@@ -1,0 +1,374 @@
+openapi: 3.0.3
+info:
+  title: ScamShield AI API
+  version: 1.2.0
+  description: |
+    Hackathon MVP for anonymous, stateless scam analysis. A risk score is a heuristic, not a probability.
+    The scope excludes JWT, a database, Family Guardian, audio analysis, persistent
+    history, and automatic notifications.
+    OpenAI upstream timeout is 45 seconds. The recommended frontend timeout is 60 seconds.
+servers:
+- url: http://10.0.2.2:3000/api/v1
+  description: Android Emulator, backend on same host
+- url: http://localhost:3000/api/v1
+  description: Local host
+paths:
+  /health:
+    get:
+      summary: Health check (no AI call)
+      operationId: getHealth
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /analysis/text:
+    post:
+      summary: Analyze text
+      operationId: analyzeText
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TextRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisResponse'
+        '400': &id001
+          description: Bad input
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413': &id002
+          description: Image too large
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429': &id003
+          description: Rate limited
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500': &id004
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502': &id005
+          description: AI provider or response error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503': &id006
+          description: AI unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '504': &id007
+          description: AI timeout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /analysis/images:
+    post:
+      summary: Analyze 1–5 screenshots in chronological order
+      operationId: analyzeImages
+      description: |
+        Send 1 to 5 JPEG, PNG, or WebP files as repeated images parts, oldest first.
+        Each image may contain up to 5 MiB (5,242,880 bytes). Combined image data
+        may contain up to 20 MiB (20,971,520 bytes), excluding multipart overhead
+        and context. The server enforces these byte limits. image_index is zero-based.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+              - images
+              properties:
+                images:
+                  type: array
+                  minItems: 1
+                  maxItems: 5
+                  items:
+                    type: string
+                    format: binary
+                context:
+                  type: string
+                  maxLength: 1000
+            encoding:
+              images:
+                contentType: image/jpeg, image/png, image/webp
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisResponse'
+        '400': *id001
+        '413': *id002
+        '429': *id003
+        '500': *id004
+        '502': *id005
+        '503': *id006
+        '504': *id007
+  /guidance/emergency:
+    post:
+      summary: Deterministic emergency guidance; no AI call
+      operationId: getEmergencyGuidance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmergencyRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmergencyResponse'
+        '400': *id001
+        '500': *id004
+components:
+  schemas:
+    Evidence:
+      type: object
+      additionalProperties: false
+      properties:
+        quote:
+          type: string
+        reason:
+          type: string
+        signal_type:
+          type: string
+          enum:
+          - URGENCY
+          - THREAT
+          - CREDENTIAL_REQUEST
+          - MONEY_REQUEST
+          - IMPERSONATION
+          - SUSPICIOUS_URL
+          - TOO_GOOD_TO_BE_TRUE
+          - OTHER
+        image_index:
+          type: integer
+          minimum: 0
+          nullable: true
+      required:
+      - quote
+      - reason
+      - signal_type
+      - image_index
+    DetectedUrl:
+      type: object
+      additionalProperties: false
+      properties:
+        url:
+          type: string
+        signals:
+          type: array
+          items:
+            type: string
+            enum:
+            - IP_HOST
+            - PUNYCODE
+            - SHORTENER
+            - MISLEADING_SUBDOMAIN
+            - USERINFO_AT
+            - LONG_URL
+            - HTTP_ONLY
+        is_verified_malicious:
+          type: boolean
+          enum:
+          - false
+      required:
+      - url
+      - signals
+      - is_verified_malicious
+    AnalysisResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        analysis_id:
+          type: string
+          format: uuid
+        input_type:
+          type: string
+          enum:
+          - TEXT
+          - IMAGE
+        risk_score:
+          type: integer
+          minimum: 0
+          maximum: 100
+          nullable: true
+        risk_level:
+          type: string
+          enum:
+          - SAFE
+          - SUSPICIOUS
+          - DANGER
+          - UNABLE_TO_ASSESS
+        scam_category:
+          type: string
+          enum: &id008
+          - BANK_IMPERSONATION
+          - GOVERNMENT_IMPERSONATION
+          - PHISHING
+          - OTP_THEFT
+          - FINANCIAL_FRAUD
+          - FAKE_RECRUITMENT
+          - FAKE_DELIVERY
+          - SOCIAL_ENGINEERING
+          - OTHER
+          - NONE
+        summary:
+          type: string
+        evidence:
+          type: array
+          items:
+            $ref: '#/components/schemas/Evidence'
+        detected_urls:
+          type: array
+          items:
+            $ref: '#/components/schemas/DetectedUrl'
+        recommended_actions:
+          type: array
+          items:
+            type: string
+        speech_summary:
+          type: string
+        analyzed_at:
+          type: string
+          format: date-time
+      required:
+      - analysis_id
+      - input_type
+      - risk_score
+      - risk_level
+      - scam_category
+      - summary
+      - evidence
+      - detected_urls
+      - recommended_actions
+      - speech_summary
+      - analyzed_at
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        statusCode:
+          type: integer
+        errorCode:
+          type: string
+          enum:
+          - INVALID_INPUT
+          - UNSUPPORTED_IMAGE_FORMAT
+          - INVALID_IMAGE
+          - IMAGE_TOO_LARGE
+          - RATE_LIMIT_EXCEEDED
+          - AI_INVALID_RESPONSE
+          - AI_PROVIDER_ERROR
+          - AI_TIMEOUT
+          - INTERNAL_ERROR
+        message:
+          type: string
+        requestId:
+          type: string
+          format: uuid
+        timestamp:
+          type: string
+          format: date-time
+      required:
+      - statusCode
+      - errorCode
+      - message
+      - requestId
+      - timestamp
+    TextRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 5000
+      required:
+      - text
+    EmergencyRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        scenario:
+          type: string
+          enum: &id009
+          - NOT_INTERACTED
+          - CLICKED_LINK
+          - SHARED_CREDENTIALS
+          - SHARED_OTP
+          - TRANSFERRED_MONEY
+          - INSTALLED_APP
+        scam_category:
+          type: string
+          enum: *id008
+      required:
+      - scenario
+    EmergencyResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        scenario:
+          type: string
+          enum: *id009
+        title:
+          type: string
+        urgency:
+          type: string
+          enum:
+          - LOW
+          - MEDIUM
+          - HIGH
+        steps:
+          type: array
+          items:
+            type: string
+      required:
+      - scenario
+      - title
+      - urgency
+      - steps
+    HealthResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum:
+          - ok
+        service:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+      required:
+      - status
+      - service
+      - timestamp
