@@ -1,0 +1,1 @@
+# State folder for challenger_1
