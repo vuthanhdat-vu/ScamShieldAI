@@ -194,6 +194,9 @@ function mapProviderError(error: unknown, signal: AbortSignal): ApiException {
   if (error instanceof ApiException) {
     return error;
   }
+  if (error instanceof Error) {
+    console.error(`[OpenAiAnalysisProvider] Upstream error: ${error.name} - ${error.message}`);
+  }
   const status = error instanceof OpenAI.APIError && typeof error.status === 'number' ? error.status : undefined;
   if (signal.aborted || error instanceof OpenAI.APIConnectionTimeoutError || status === 408 || status === 504) {
     return new ApiException(ErrorCode.AI_TIMEOUT);

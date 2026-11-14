@@ -26,6 +26,7 @@ describe('Real provider wiring with offline OpenAI transport', () => {
         MOCK_AI: false,
         OPENAI_API_KEY: 'offline-fixture',
         OPENAI_MODEL: 'offline-model',
+        OPENAI_BASE_URL: 'https://api.openai.com/v1',
       }))
       .compile();
     app = module.createNestApplication({ logger: false });
