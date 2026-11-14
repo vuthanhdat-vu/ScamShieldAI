@@ -199,7 +199,7 @@ describe('v1.2 mock API', () => {
         input_type: 'IMAGE', risk_level: 'UNABLE_TO_ASSESS', risk_score: null, evidence: [], detected_urls: [],
       });
       expect(spy).toHaveBeenCalledTimes(1);
-      expect(spy.mock.calls[0][0]).toEqual({
+      expect(spy.mock.calls[0][0]).toEqual(expect.objectContaining({
         inputType: 'IMAGE',
         images: [
           { bytes: png, mediaType: 'image/png' },
@@ -207,7 +207,15 @@ describe('v1.2 mock API', () => {
           { bytes: jpeg, mediaType: 'image/jpeg' },
         ],
         context: '🛡'.repeat(1000),
-      });
+        dialogue: expect.objectContaining({
+          formattedPromptText: expect.any(String),
+          turns: expect.any(Array),
+        }),
+        ocrResult: expect.objectContaining({
+          fullTranscript: expect.any(String),
+          turns: expect.any(Array),
+        }),
+      }));
     } finally {
       spy.mockRestore();
     }

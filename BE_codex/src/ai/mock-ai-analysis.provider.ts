@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { evidenceClauses, normalizeEvidence, supportsSignal } from '../analysis/evidence-context';
 import { InputType, ScamCategory, SignalType } from '../contracts/analysis.enums';
-import type { AiAnalysisCandidate, AiAnalysisInput, AiAnalysisProvider } from './ai-analysis-provider';
+import type {
+  AiAnalysisCandidate, AiAnalysisInput, AiAnalysisProvider, AiEvidence,
+} from './ai-analysis-provider';
 
 const mockRules = [
   [SignalType.CREDENTIAL_REQUEST, 'Nội dung yêu cầu cung cấp thông tin xác thực.'],
@@ -16,20 +18,58 @@ export class MockAiAnalysisProvider implements AiAnalysisProvider {
   analyze(input: AiAnalysisInput, signal: AbortSignal): Promise<AiAnalysisCandidate> {
     signal.throwIfAborted();
 
+    if (input.inputType === InputType.IMAGE) {
+      const turns = input.dialogue?.turns ?? [];
+      const validTurns = turns.filter(
+        (turn) => turn.text && turn.text !== 'Tin nhắn không xác định từ ảnh chụp màn hình.' && /[\p{L}\p{N}]/u.test(turn.text),
+      );
+      if (validTurns.length === 0) {
+        return Promise.resolve({
+          canAssess: false,
+          suggestedCategory: ScamCategory.NONE,
+          summary: 'Chế độ mô phỏng chưa đọc được nội dung trong ảnh.',
+          evidence: [],
+          recommendedActions: ['Gửi nội dung hội thoại dưới dạng văn bản.'],
+          speechSummary: 'Chế độ mô phỏng chưa đọc được nội dung trong ảnh.',
+        });
+      }
+
+      const evidence: AiEvidence[] = [];
+      for (const turn of validTurns) {
+        const clauses = evidenceClauses(turn.text).map((clause) => clause.trim());
+        for (const [signalType, reason] of mockRules) {
+          const quote = clauses.find((clause) => supportsSignal(normalizeEvidence(clause), signalType));
+          if (quote) {
+            evidence.push({ quote, reason, signalType, imageIndex: turn.imageIndex });
+          }
+        }
+      }
+
+      const summary = evidence.length
+        ? 'Phát hiện dấu hiệu rủi ro theo quy tắc mô phỏng từ ảnh.'
+        : 'Chưa thấy dấu hiệu trong các mẫu văn bản mô phỏng từ ảnh.';
+
+      return Promise.resolve({
+        canAssess: true,
+        suggestedCategory: ScamCategory.NONE,
+        summary,
+        evidence,
+        recommendedActions: ['Xác minh thông tin qua kênh chính thức trước khi thực hiện yêu cầu.'],
+        speechSummary: summary,
+      });
+    }
+
     if (
-      input.inputType === InputType.IMAGE || !/[\p{L}\p{N}]/u.test(input.text) ||
+      !/[\p{L}\p{N}]/u.test(input.text) ||
       /^(?:otp|ngân hàng|công an|tiền|chuyển tiền|chuyển khoản|bank|police|money|urgent|khẩn cấp)[.!?]*$/iu.test(normalizeEvidence(input.text))
     ) {
-      const image = input.inputType === InputType.IMAGE;
-      const summary = image
-        ? 'Chế độ mô phỏng chưa đọc được nội dung trong ảnh.'
-        : 'Tin nhắn không đủ thông tin để đánh giá.';
+      const summary = 'Tin nhắn không đủ thông tin để đánh giá.';
       return Promise.resolve({
         canAssess: false,
         suggestedCategory: ScamCategory.NONE,
         summary,
         evidence: [],
-        recommendedActions: [image ? 'Gửi nội dung hội thoại dưới dạng văn bản.' : 'Gửi thêm nội dung tin nhắn.'],
+        recommendedActions: ['Gửi thêm nội dung tin nhắn.'],
         speechSummary: summary,
       });
     }
@@ -52,3 +92,4 @@ export class MockAiAnalysisProvider implements AiAnalysisProvider {
     });
   }
 }
+

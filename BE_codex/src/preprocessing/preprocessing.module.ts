@@ -20,7 +20,13 @@ function getModule(metadata: { providers?: any[]; exports?: any[] }): ClassDecor
 export const Module = getModule;
 
 @Module({
-  providers: [PreprocessingService, PiiSanitizer],
+  providers: [
+    PreprocessingService,
+    {
+      provide: PiiSanitizer,
+      useFactory: () => new PiiSanitizer(),
+    },
+  ],
   exports: [PreprocessingService, PiiSanitizer],
 })
 export class PreprocessingModule {}

@@ -80,6 +80,23 @@ describe('OpenAI Responses adapter offline', () => {
     }]);
   });
 
+  it('appends OCR transcript to content when dialogue is present', async () => {
+    const { create, provider } = setup();
+    await provider.analyze({
+      inputType: InputType.IMAGE,
+      images: [png],
+      dialogue: {
+        turns: [{ speaker: 'peer', text: 'Gửi mã OTP', imageIndex: 0 }],
+        formattedPromptText: '[Peer]: Gửi mã OTP',
+        sanitizedPiiCount: 0,
+      },
+    }, new AbortController().signal);
+    const [{ input }] = create.mock.calls[0];
+    expect(input[0].content).toEqual(expect.arrayContaining([
+      { type: 'input_text', text: 'OCR Transcript:\n[Peer]: Gửi mã OTP' },
+    ]));
+  });
+
   it.each([
     { ...otpOutput, risk_score: 0 },
     { ...otpOutput, suggestedCategory: 'UNLISTED' },

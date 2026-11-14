@@ -1,5 +1,7 @@
 import type { UploadedImage } from '../analysis/dto/images-request.dto';
 import type { InputType, ScamCategory, SignalType } from '../contracts/analysis.enums';
+import type { OcrResult } from '../ocr/ocr.interfaces';
+import type { PreprocessedDialogue } from '../preprocessing/preprocessing.interfaces';
 
 export const AI_ANALYSIS_PROVIDER = Symbol('AI_ANALYSIS_PROVIDER');
 export const OPENAI_UPSTREAM_TIMEOUT_MS = 45_000;
@@ -10,6 +12,8 @@ export type AiAnalysisInput =
       readonly inputType: InputType.IMAGE;
       readonly images: readonly UploadedImage[];
       readonly context?: string;
+      readonly dialogue?: PreprocessedDialogue;
+      readonly ocrResult?: OcrResult;
     };
 
 export interface AiEvidence {

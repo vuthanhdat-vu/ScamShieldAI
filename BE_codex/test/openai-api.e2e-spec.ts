@@ -127,6 +127,7 @@ describe('Real provider wiring with offline OpenAI transport', () => {
           { image_url: 'data:image/png;base64,' + png.toString('base64') },
           { text: 'Screenshot 1' },
           { image_url: 'data:image/jpeg;base64,' + jpeg.toString('base64') },
+          { text: expect.stringContaining('Tin nhắn không xác định') },
         ],
       }],
     });

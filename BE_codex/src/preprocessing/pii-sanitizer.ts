@@ -19,6 +19,22 @@ function getInjectable(): ClassDecorator {
 
 export const Injectable = getInjectable;
 
+function getOptional(): ParameterDecorator {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const nest = require('@nestjs/common');
+    if (typeof nest?.Optional === 'function') {
+      return nest.Optional();
+    }
+  } catch {
+    // Standalone fallback
+  }
+  return () => {};
+}
+
+export const Optional = getOptional;
+
+
 export type PiiEntityType =
   | 'PASSWORD'
   | 'PERSON_NAME'
@@ -45,7 +61,7 @@ export class PiiSanitizer {
   private readonly entityCounters = new Map<PiiEntityType, number>();
   private readonly tokenReferences: MaskedTokenReference[] = [];
 
-  constructor(sessionSalt?: Buffer) {
+  constructor(@Optional() sessionSalt?: Buffer) {
     this.sessionSalt = sessionSalt ?? crypto.randomBytes(32);
   }
 
