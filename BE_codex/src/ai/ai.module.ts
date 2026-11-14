@@ -19,7 +19,7 @@ import { OpenAiAnalysisProvider } from './openai-analysis.provider';
 
         const client = new OpenAI({
           apiKey: config.getOrThrow('OPENAI_API_KEY', { infer: true }),
-          baseURL: 'https://api.openai.com/v1',
+          baseURL: config.get('OPENAI_BASE_URL', { infer: true }) || 'https://api.openai.com/v1',
           timeout: OPENAI_UPSTREAM_TIMEOUT_MS,
           maxRetries: 0,
           logLevel: 'off',

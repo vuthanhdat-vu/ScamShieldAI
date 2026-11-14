@@ -1,5 +1,10 @@
 import OpenAI from 'openai';
 import type {
+  ChatCompletion,
+  ChatCompletionContentPart,
+  ChatCompletionCreateParamsNonStreaming,
+} from 'openai/resources/chat/completions';
+import type {
   Response, ResponseCreateParamsNonStreaming, ResponseInputContent,
 } from 'openai/resources/responses/responses';
 import { ApiException } from '../common/http/api-exception';
@@ -35,20 +40,19 @@ export class OpenAiAnalysisProvider implements AiAnalysisProvider {
   constructor(private readonly client: OpenAI, private readonly model: string) {}
 
   async analyze(input: AiAnalysisInput, signal: AbortSignal): Promise<AiAnalysisCandidate> {
-    let response: Response;
+    let output: OpenAiAnalysisOutput;
     try {
       signal.throwIfAborted();
-      response = await this.client.responses.create(this.request(input), {
-        signal,
-        timeout: OPENAI_UPSTREAM_TIMEOUT_MS,
-        maxRetries: 0,
-      });
+      if (this.shouldUseChatCompletions()) {
+        output = await this.analyzeWithChat(input, signal);
+      } else {
+        output = await this.analyzeWithResponses(input, signal);
+      }
       signal.throwIfAborted();
     } catch (error) {
       throw mapProviderError(error, signal);
     }
 
-    const output = parseModelOutput(response);
     if (!output.canAssess) {
       const image = input.inputType === InputType.IMAGE;
       const summary = image
@@ -71,6 +75,33 @@ export class OpenAiAnalysisProvider implements AiAnalysisProvider {
         'Không cung cấp mật khẩu, mã OTP hoặc thông tin thanh toán.',
       ],
     };
+  }
+
+  private shouldUseChatCompletions(): boolean {
+    try {
+      const url = new URL(this.client.baseURL);
+      return url.hostname !== 'api.openai.com';
+    } catch {
+      return false;
+    }
+  }
+
+  private async analyzeWithResponses(input: AiAnalysisInput, signal: AbortSignal): Promise<OpenAiAnalysisOutput> {
+    const response = await this.client.responses.create(this.request(input), {
+      signal,
+      timeout: OPENAI_UPSTREAM_TIMEOUT_MS,
+      maxRetries: 0,
+    });
+    return parseModelOutput(response);
+  }
+
+  private async analyzeWithChat(input: AiAnalysisInput, signal: AbortSignal): Promise<OpenAiAnalysisOutput> {
+    const completion = await this.client.chat.completions.create(this.chatRequest(input), {
+      signal,
+      timeout: OPENAI_UPSTREAM_TIMEOUT_MS,
+      maxRetries: 0,
+    });
+    return parseChatOutput(completion);
   }
 
   private request(input: AiAnalysisInput): ResponseCreateParamsNonStreaming {
@@ -104,9 +135,65 @@ export class OpenAiAnalysisProvider implements AiAnalysisProvider {
       },
     };
   }
+
+  private chatRequest(input: AiAnalysisInput): ChatCompletionCreateParamsNonStreaming {
+    const messages: ChatCompletionCreateParamsNonStreaming['messages'] = [
+      {
+        role: 'system',
+        content: `${INSTRUCTIONS}\n\nIMPORTANT: You must return ONLY a JSON object strictly matching this schema:\n${JSON.stringify(OPENAI_ANALYSIS_SCHEMA)}`,
+      },
+    ];
+
+    if (input.inputType === InputType.TEXT) {
+      messages.push({
+        role: 'user',
+        content: JSON.stringify({ inputType: input.inputType, text: input.text }),
+      });
+    } else {
+      const parts: ChatCompletionContentPart[] = [
+        {
+          type: 'text',
+          text: JSON.stringify({ inputType: input.inputType, context: input.context }),
+        },
+      ];
+      input.images.forEach(({ bytes, mediaType }, index) => {
+        parts.push(
+          { type: 'text', text: `Screenshot ${index}` },
+          {
+            type: 'image_url',
+            image_url: {
+              url: `data:${mediaType};base64,${bytes.toString('base64')}`,
+              detail: 'high',
+            },
+          },
+        );
+      });
+      if (input.dialogue?.formattedPromptText) {
+        parts.push({
+          type: 'text',
+          text: `OCR Transcript:\n${input.dialogue.formattedPromptText}`,
+        });
+      }
+      messages.push({
+        role: 'user',
+        content: parts,
+      });
+    }
+
+    return {
+      model: this.model,
+      messages,
+      response_format: { type: 'json_object' },
+      max_tokens: 3000,
+      temperature: 0.1,
+    };
+  }
 }
 
 function mapProviderError(error: unknown, signal: AbortSignal): ApiException {
+  if (error instanceof ApiException) {
+    return error;
+  }
   const status = error instanceof OpenAI.APIError && typeof error.status === 'number' ? error.status : undefined;
   if (signal.aborted || error instanceof OpenAI.APIConnectionTimeoutError || status === 408 || status === 504) {
     return new ApiException(ErrorCode.AI_TIMEOUT);
@@ -117,6 +204,31 @@ function mapProviderError(error: unknown, signal: AbortSignal): ApiException {
   const unavailable = error instanceof OpenAI.APIConnectionError || status === 429 ||
     (status !== undefined && status >= 500);
   return new ApiException(ErrorCode.AI_PROVIDER_ERROR, { providerUnavailable: unavailable });
+}
+
+function parseChatOutput(completion: ChatCompletion): OpenAiAnalysisOutput {
+  const choice = completion?.choices?.[0];
+  const content = choice?.message?.content;
+  if (!content || typeof content !== 'string') {
+    throw new ApiException(ErrorCode.AI_INVALID_RESPONSE);
+  }
+
+  let cleaned = content.trim();
+  if (cleaned.startsWith('```json')) {
+    cleaned = cleaned.replace(/^```json\s*/u, '').replace(/\s*```$/u, '');
+  } else if (cleaned.startsWith('```')) {
+    cleaned = cleaned.replace(/^```\s*/u, '').replace(/\s*```$/u, '');
+  }
+
+  try {
+    const output: unknown = JSON.parse(cleaned);
+    if (!validateOpenAiOutput(output) || !output.summary.trim() || !output.speechSummary.trim()) {
+      throw new Error('Expected valid analysis fields.');
+    }
+    return output;
+  } catch {
+    throw new ApiException(ErrorCode.AI_INVALID_RESPONSE);
+  }
 }
 
 function parseModelOutput(response: Response): OpenAiAnalysisOutput {

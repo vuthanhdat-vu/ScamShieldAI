@@ -5,6 +5,7 @@ export interface Environment {
   MOCK_AI: boolean;
   OPENAI_API_KEY?: string;
   OPENAI_MODEL?: string;
+  OPENAI_BASE_URL?: string;
   OPENAI_TIMEOUT_MS: typeof OPENAI_UPSTREAM_TIMEOUT_MS;
   CORS_ORIGINS: string[];
 }
@@ -34,6 +35,14 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     throw new ConfigurationError('OPENAI_MODEL is required when MOCK_AI is false.');
   }
 
+  const rawBaseUrl = typeof raw.OPENAI_BASE_URL === 'string' ? raw.OPENAI_BASE_URL.trim() : '';
+  const baseUrl = rawBaseUrl || undefined;
+  if (baseUrl) {
+    if (!/^https?:\/\//u.test(baseUrl) || !URL.canParse(baseUrl)) {
+      throw new ConfigurationError('OPENAI_BASE_URL must be a valid HTTP(S) URL.');
+    }
+  }
+
   const timeout = raw.OPENAI_TIMEOUT_MS ?? String(OPENAI_UPSTREAM_TIMEOUT_MS);
   if (timeout !== String(OPENAI_UPSTREAM_TIMEOUT_MS)) {
     throw new ConfigurationError('OPENAI_TIMEOUT_MS must be 45000 under API Contract v1.2.');
@@ -55,6 +64,7 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     MOCK_AI: mockValue === 'true',
     OPENAI_API_KEY: key || undefined,
     OPENAI_MODEL: model || undefined,
+    ...(baseUrl ? { OPENAI_BASE_URL: baseUrl } : {}),
     OPENAI_TIMEOUT_MS: OPENAI_UPSTREAM_TIMEOUT_MS,
     CORS_ORIGINS: [...new Set(origins)],
   };

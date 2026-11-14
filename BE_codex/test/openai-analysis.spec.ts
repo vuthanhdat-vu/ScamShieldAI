@@ -266,4 +266,97 @@ describe('OpenAI Responses adapter offline', () => {
       jest.useRealTimers();
     }
   });
+
+  describe('Chat Completions adapter (Google AI Studio / OpenAI-compatible endpoints)', () => {
+    function setupChat() {
+      const fetch = jest.fn<ReturnType<typeof globalThis.fetch>, Parameters<typeof globalThis.fetch>>()
+        .mockRejectedValue(new Error('Network forbidden in this test'));
+      const client = new OpenAI({
+        apiKey: 'offline-fixture',
+        baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+        fetch,
+        logLevel: 'off',
+      });
+      const chatCreate = jest.spyOn(client.chat.completions, 'create').mockResolvedValue({
+        id: 'chat-test-1',
+        choices: [
+          {
+            finish_reason: 'stop',
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: JSON.stringify(otpOutput),
+            },
+          },
+        ],
+        created: 123456789,
+        model: 'gemini-3-flash-preview',
+        object: 'chat.completion',
+      } as any);
+      const provider = new OpenAiAnalysisProvider(client, 'gemini-3-flash-preview');
+      return { chatCreate, provider, client };
+    }
+
+    it('routes requests to chat.completions.create when baseURL is Google AI Studio', async () => {
+      const { chatCreate, provider } = setupChat();
+      const signal = new AbortController().signal;
+      const result = await provider.analyze(textInput, signal);
+
+      expect(chatCreate).toHaveBeenCalledTimes(1);
+      const [request, options] = chatCreate.mock.calls[0];
+      expect(request).toMatchObject({
+        model: 'gemini-3-flash-preview',
+        response_format: { type: 'json_object' },
+        temperature: 0.1,
+      });
+      expect(request.messages[0].role).toBe('system');
+      expect(request.messages[1].role).toBe('user');
+      expect(options).toEqual({ signal, timeout: 45_000, maxRetries: 0 });
+      expect(result.canAssess).toBe(true);
+      expect(result.suggestedCategory).toBe(ScamCategory.OTP_THEFT);
+    });
+
+    it('parses markdown code-fenced JSON responses from chat models', async () => {
+      const { chatCreate, provider } = setupChat();
+      chatCreate.mockResolvedValueOnce({
+        id: 'chat-test-2',
+        choices: [
+          {
+            finish_reason: 'stop',
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: `\`\`\`json\n${JSON.stringify(otpOutput)}\n\`\`\``,
+            },
+          },
+        ],
+        created: 123456789,
+        model: 'gemini-3-flash-preview',
+        object: 'chat.completion',
+      } as any);
+
+      const result = await provider.analyze(textInput, new AbortController().signal);
+      expect(result.canAssess).toBe(true);
+      expect(result.suggestedCategory).toBe(ScamCategory.OTP_THEFT);
+    });
+
+    it('sends image parts correctly to chat completions', async () => {
+      const { chatCreate, provider } = setupChat();
+      await provider.analyze({
+        inputType: InputType.IMAGE,
+        images: [png],
+        context: 'User context',
+      }, new AbortController().signal);
+
+      expect(chatCreate).toHaveBeenCalledTimes(1);
+      const [request] = chatCreate.mock.calls[0];
+      const userMessage = request.messages.find((m: any) => m.role === 'user');
+      expect(Array.isArray(userMessage.content)).toBe(true);
+      expect(userMessage.content).toEqual(expect.arrayContaining([
+        { type: 'text', text: JSON.stringify({ inputType: 'IMAGE', context: 'User context' }) },
+        { type: 'text', text: 'Screenshot 0' },
+        expect.objectContaining({ type: 'image_url' }),
+      ]));
+    });
+  });
 });
