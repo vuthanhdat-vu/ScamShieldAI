@@ -1,1 +1,0 @@
-# State folder for explorer_arch_1

@@ -1,1 +1,0 @@
-# State folder for auditor_final
